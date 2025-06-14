@@ -1,5 +1,0 @@
-TELEGRAM_BOT_TOKEN = "8188063683:AAGZ3vy0_HB4fTLcmbHCjrtxhzsZbgGoLQw"
-TELEGRAM_CHAT_ID = "-1002845747985"
-DERIV_APP_ID = "1089"  # Deriv's default app ID
-DEVELOPMENT_MODE = True  # Set to False in production
-LOG_FILE = "deriv_bot.log"
