@@ -36,7 +36,7 @@ keep_alive()
 # Configuration from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-DERIV_APP_ID = os.getenv('DERIV_APP_ID', '1089')  # Default Deriv app ID
+DERIV_APP_ID = os.getenv('DERIV_APP_ID', '1089')
 LOG_FILE = os.getenv('LOG_FILE', 'deriv_bot.log')
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
@@ -56,19 +56,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Production-optimized symbol configuration
+# Corrected symbol configuration based on the trading strategy
 SYMBOLS = {
     "CRASH": {
         "code": "1HZ100V",
         "name": "Crash 1000 Index",
-        "signal_type": "SELL",
-        "pip_size": 0.1,
-        "tp_pips": 85,
-        "sl_pips": 15,
+        "signal_type": "SELL",  # Only SELL for crash
+        "pip_size": 0.01,  # Crash pip size is typically 0.01
+        "tp_pips_min": 70,
+        "tp_pips_max": 100,
+        "sl_pips_min": 10,
+        "sl_pips_max": 15,
         "ohlc_request": {
             "ticks_history": "1HZ100V",
             "end": "latest",
-            "count": 1,
+            "count": 50,  # Get more historical data
             "granularity": 1800,  # 30 minutes
             "style": "candles",
             "subscribe": 1
@@ -76,15 +78,17 @@ SYMBOLS = {
     },
     "BOOM": {
         "code": "1HZ150V",
-        "name": "Boom 1000 Index",
-        "signal_type": "BUY",
-        "pip_size": 0.1,
-        "tp_pips": 100,
-        "sl_pips": 15,
+        "name": "Boom 1000 Index", 
+        "signal_type": "BUY",  # Only BUY for boom
+        "pip_size": 0.01,  # Boom pip size is typically 0.01
+        "tp_pips_min": 80,
+        "tp_pips_max": 150,
+        "sl_pips_min": 10,
+        "sl_pips_max": 20,
         "ohlc_request": {
             "ticks_history": "1HZ150V",
             "end": "latest",
-            "count": 1,
+            "count": 50,  # Get more historical data
             "granularity": 1800,
             "style": "candles",
             "subscribe": 1
@@ -124,13 +128,97 @@ class BotHealthMonitor:
             f"💾 Disk: {stats['disk']}%"
         )
 
-# Global state
-current_day = None
+# Global state tracking
 health_monitor = BotHealthMonitor()
-first_candle_data = {
-    "CRASH": {"price": None, "alert_count": 0, "last_alert_time": None},
-    "BOOM": {"price": None, "alert_count": 0, "last_alert_time": None}
+trading_data = {
+    "CRASH": {
+        "previous_day_trend": None,  # "BEARISH" or "BULLISH"
+        "first_candle_close": None,
+        "daily_trade_count": 0,
+        "last_trade_date": None,
+        "historical_candles": [],
+        "no_trade_alert_sent": False  # Track if we already sent no-trade alert today
+    },
+    "BOOM": {
+        "previous_day_trend": None,  # "BEARISH" or "BULLISH"
+        "first_candle_close": None,
+        "daily_trade_count": 0,
+        "last_trade_date": None,
+        "historical_candles": [],
+        "no_trade_alert_sent": False  # Track if we already sent no-trade alert today
+    }
 }
+
+def is_new_day():
+    """Check if we're in a new trading day (UTC)"""
+    now = datetime.utcnow()
+    current_date = now.date()
+    
+    for symbol in trading_data:
+        if trading_data[symbol]["last_trade_date"] != current_date:
+            return True
+    return False
+
+def reset_daily_data():
+    """Reset daily trading data for new day"""
+    current_date = datetime.utcnow().date()
+    
+    for symbol in trading_data:
+        # Reset daily counters but preserve historical data
+        trading_data[symbol]["daily_trade_count"] = 0
+        trading_data[symbol]["first_candle_close"] = None
+        trading_data[symbol]["last_trade_date"] = current_date
+        trading_data[symbol]["no_trade_alert_sent"] = False  # Reset alert flag
+    
+    logger.info(f"Daily data reset for {current_date}")
+
+def analyze_previous_day_trend(symbol, candles):
+    """
+    Analyze previous day trend based on the strategy:
+    - Look at all 30min candles from previous day
+    - Determine if market was buying (bullish) or selling (bearish)
+    """
+    if len(candles) < 48:  # Need at least 2 days of 30min candles
+        return None
+    
+    # Get previous day candles (last 48 candles = yesterday's data)
+    previous_day_candles = candles[-96:-48]  # 48 candles ago to 48 candles ago
+    
+    if not previous_day_candles:
+        return None
+    
+    # Calculate trend based on overall price movement
+    day_open = float(previous_day_candles[0]["open"])
+    day_close = float(previous_day_candles[-1]["close"])
+    
+    # Count bullish vs bearish candles
+    bullish_count = 0
+    bearish_count = 0
+    
+    for candle in previous_day_candles:
+        open_price = float(candle["open"])
+        close_price = float(candle["close"])
+        
+        if close_price > open_price:
+            bullish_count += 1
+        elif close_price < open_price:
+            bearish_count += 1
+    
+    # Determine overall trend
+    if day_close > day_open and bullish_count > bearish_count:
+        return "BULLISH"
+    elif day_close < day_open and bearish_count > bullish_count:
+        return "BEARISH"
+    else:
+        # If unclear, use candle count as tie-breaker
+        return "BULLISH" if bullish_count > bearish_count else "BEARISH"
+
+def is_first_candle_of_day(candle_epoch):
+    """Check if this is the first 30min candle of the current day"""
+    candle_time = datetime.utcfromtimestamp(candle_epoch)
+    
+    # First candle is at 00:00 or 00:30 UTC
+    return candle_time.hour == 0 and candle_time.minute in [0, 30]
 
 async def send_telegram_alert(message, disable_notification=False):
     """Production-ready Telegram alert with retry and timeout"""
@@ -158,114 +246,159 @@ async def send_telegram_alert(message, disable_notification=False):
     logger.error("Failed to send Telegram alert after 3 attempts")
     return False
 
-def format_alert(symbol_config, entry_price, first_candle_close):
-    """Optimized alert formatting"""
+def format_trade_alert(symbol, symbol_config, entry_price, first_candle_close, trend):
+    """Format trading alert according to strategy"""
     current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M GMT")
     
-    if symbol_config["signal_type"] == "SELL":
-        sl = round(first_candle_close + symbol_config["sl_pips"] * symbol_config["pip_size"], 1)
-        tp = round(entry_price - symbol_config["tp_pips"] * symbol_config["pip_size"], 1)
+    if symbol == "CRASH":
+        # SELL signal for crash
+        sl = round(entry_price + (symbol_config["sl_pips_max"] * symbol_config["pip_size"]), 2)
+        tp = round(entry_price - (symbol_config["tp_pips_min"] * symbol_config["pip_size"]), 2)
+        signal_type = "SELL"
         direction = "below"
         emoji = "🔻"
-    else:  # BUY
-        sl = round(first_candle_close - symbol_config["sl_pips"] * symbol_config["pip_size"], 1)
-        tp = round(entry_price + symbol_config["tp_pips"] * symbol_config["pip_size"], 1)
+        condition = f"Bearish candle closed below first candle close ({first_candle_close})"
+    else:  # BOOM
+        # BUY signal for boom
+        sl = round(entry_price - (symbol_config["sl_pips_max"] * symbol_config["pip_size"]), 2)
+        tp = round(entry_price + (symbol_config["tp_pips_min"] * symbol_config["pip_size"]), 2)
+        signal_type = "BUY"
         direction = "above"
         emoji = "🔺"
+        condition = f"Bullish candle closed above first candle close ({first_candle_close})"
     
     return (
-        f"🚨 <b>{symbol_config['name']} {symbol_config['signal_type']} Signal</b>\n\n"
-        f"{emoji} Breakout {direction} first 30m candle close\n"
-        f"🎯 Entry: {entry_price}\n💰 TP: {tp}\n❌ SL: {sl}\n\n"
-        f"📆 Date: {current_time.split()[0]}\n⏰ Time: {current_time.split()[1]}"
+        f"🚨 <b>{symbol_config['name']} {signal_type} Signal</b>\n\n"
+        f"📊 Previous Day Trend: {trend}\n"
+        f"🎯 Condition: {condition}\n\n"
+        f"{emoji} <b>Trade Details:</b>\n"
+        f"💰 Entry: {entry_price}\n"
+        f"🎯 TP: {tp}\n"
+        f"❌ SL: {sl}\n\n"
+        f"📅 Date: {current_time.split()[0]}\n"
+        f"⏰ Time: {current_time.split()[1]}\n\n"
+        f"📈 Daily Trade Count: {trading_data[symbol]['daily_trade_count'] + 1}/2"
     )
 
-def is_new_trading_day():
-    """Check if UTC date has changed"""
-    global current_day
-    now = datetime.utcnow()
-    today = now.date()
+def format_no_trade_alert(symbol, symbol_config, trend, reason):
+    """Format alert when we're not trading due to wrong market conditions"""
+    current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M GMT")
     
-    if current_day != today:
-        logger.info(f"New trading day detected: {today}")
-        current_day = today
-        return True
-    return False
+    if symbol == "CRASH":
+        required_trend = "BEARISH"
+        our_rule = "CRASH = SELL ONLY"
+        wrong_condition = "Previous day was BULLISH (we need BEARISH)"
+    else:  # BOOM
+        required_trend = "BULLISH" 
+        our_rule = "BOOM = BUY ONLY"
+        wrong_condition = "Previous day was BEARISH (we need BULLISH)"
+    
+    return (
+        f"⚠️ <b>NO TRADE ALERT - {symbol_config['name']}</b>\n\n"
+        f"❌ <b>Market conditions don't match our strategy</b>\n\n"
+        f"📊 Previous Day Trend: {trend}\n"
+        f"📋 Our Rule: {our_rule}\n"
+        f"🚫 Issue: {wrong_condition}\n\n"
+        f"💡 <b>Action:</b> No trading for {symbol} today\n"
+        f"⏳ Will check again tomorrow\n\n"
+        f"📅 Date: {current_time.split()[0]}\n"
+        f"⏰ Time: {current_time.split()[1]}"
+    )
 
-def reset_daily_data():
-    """Reset daily tracking data"""
-    for symbol in first_candle_data:
-        first_candle_data[symbol] = {"price": None, "alert_count": 0, "last_alert_time": None}
-    logger.info("Daily data reset complete")
-
-def process_candle(symbol, candle):
-    """Production-optimized candle processing"""
+def process_candle_data(symbol, candle):
+    """Process candle according to the correct trading strategy"""
     try:
         health_monitor.message_count += 1
         
-        if is_new_trading_day():
+        if is_new_day():
             reset_daily_data()
         
         symbol_config = SYMBOLS[symbol]
-        data = first_candle_data[symbol]
+        data = trading_data[symbol]
         
-        candle_close = float(candle.get("close", 0))
-        candle_open = float(candle.get("open", 0))
-        candle_epoch = int(candle.get("epoch", 0))
+        # Add candle to historical data
+        candle_data = {
+            "open": float(candle.get("open", 0)),
+            "close": float(candle.get("close", 0)),
+            "high": float(candle.get("high", 0)),
+            "low": float(candle.get("low", 0)),
+            "epoch": int(candle.get("epoch", 0))
+        }
         
-        # Get current time in UTC
-        now = datetime.utcnow()
-        current_minute = now.minute
-        current_hour = now.hour
+        data["historical_candles"].append(candle_data)
         
-        # Only consider candles at :00 or :30 minutes (30-minute intervals)
-        if current_minute not in [0, 30]:
-            logger.debug(f"Ignoring candle at non-30min interval: {now}")
-            return
+        # Keep only last 200 candles (about 4 days)
+        if len(data["historical_candles"]) > 200:
+            data["historical_candles"] = data["historical_candles"][-200:]
+        
+        candle_epoch = candle_data["epoch"]
+        candle_open = candle_data["open"]
+        candle_close = candle_data["close"]
+        
+        # Check if this is the first candle of the day
+        if is_first_candle_of_day(candle_epoch) and data["first_candle_close"] is None:
+            data["first_candle_close"] = candle_close
+            logger.info(f"First candle of day stored for {symbol}: {candle_close}")
             
-        # Store first candle of the day (only at market open)
-        if data["price"] is None:
-            # Only accept first candle at market open time (adjust to your timezone)
-            if current_hour == 0 and current_minute == 0:  # Midnight UTC
-                data["price"] = candle_close
-                data["first_candle_time"] = now
-                logger.info(f"First candle for {symbol} at {now}: {candle_close}")
-                if DEVELOPMENT_MODE:
-                    test_msg = f"🔹 First candle stored for {symbol_config['name']} @ {candle_close}"
-                    asyncio.create_task(send_telegram_alert(test_msg, True))
-                return
-            else:
-                logger.debug(f"Ignoring potential first candle at wrong time: {now}")
-                return
-        
-        # Don't process signals until we have a first candle reference
-        if data["price"] is None:
-            logger.debug("No first candle reference yet")
-            return
+            # Analyze previous day trend
+            if len(data["historical_candles"]) >= 48:
+                data["previous_day_trend"] = analyze_previous_day_trend(symbol, data["historical_candles"])
+                logger.info(f"Previous day trend for {symbol}: {data['previous_day_trend']}")
+                
+                # Send NO TRADE alert if market conditions don't match our rules
+                if symbol == "CRASH" and data["previous_day_trend"] != "BEARISH":
+                    if not data["no_trade_alert_sent"]:  # Only send once per day
+                        no_trade_alert = format_no_trade_alert(symbol, symbol_config, 
+                                                             data["previous_day_trend"], "wrong_trend")
+                        asyncio.create_task(send_telegram_alert(no_trade_alert))
+                        data["no_trade_alert_sent"] = True
+                        logger.info(f"NO TRADE alert sent for {symbol} - Previous day was {data['previous_day_trend']}")
+                
+                elif symbol == "BOOM" and data["previous_day_trend"] != "BULLISH":
+                    if not data["no_trade_alert_sent"]:  # Only send once per day
+                        no_trade_alert = format_no_trade_alert(symbol, symbol_config,
+                                                             data["previous_day_trend"], "wrong_trend")
+                        asyncio.create_task(send_telegram_alert(no_trade_alert))
+                        data["no_trade_alert_sent"] = True
+                        logger.info(f"NO TRADE alert sent for {symbol} - Previous day was {data['previous_day_trend']}")
             
-        # Check signal conditions (only after first candle is set)
+            return
+        
+        # Skip if we don't have required data
+        if (data["first_candle_close"] is None or 
+            data["previous_day_trend"] is None or 
+            data["daily_trade_count"] >= 2):
+            return
+        
+        # Check trading conditions based on strategy
         if symbol == "CRASH":
-            if (candle_close < candle_open and 
-                candle_close < data["price"] and 
-                data["alert_count"] < 2):
-                alert = format_alert(symbol_config, candle_close, data["price"])
-                logger.info(f"CRASH SELL signal @ {candle_close}")
+            # For CRASH: Only trade if previous day was BEARISH
+            if (data["previous_day_trend"] == "BEARISH" and
+                candle_close < candle_open and  # Bearish candle
+                candle_close < data["first_candle_close"]):  # Closed below first candle
+                
+                alert = format_trade_alert(symbol, symbol_config, candle_close, 
+                                         data["first_candle_close"], data["previous_day_trend"])
+                
+                logger.info(f"CRASH SELL signal generated @ {candle_close}")
                 asyncio.create_task(send_telegram_alert(alert))
-                data["alert_count"] += 1
-                data["last_alert_time"] = datetime.utcnow()
-        
+                data["daily_trade_count"] += 1
+                
         elif symbol == "BOOM":
-            if (candle_close > candle_open and 
-                candle_close > data["price"] and 
-                data["alert_count"] < 2):
-                alert = format_alert(symbol_config, candle_close, data["price"])
-                logger.info(f"BOOM BUY signal @ {candle_close}")
+            # For BOOM: Only trade if previous day was BULLISH
+            if (data["previous_day_trend"] == "BULLISH" and
+                candle_close > candle_open and  # Bullish candle
+                candle_close > data["first_candle_close"]):  # Closed above first candle
+                
+                alert = format_trade_alert(symbol, symbol_config, candle_close,
+                                         data["first_candle_close"], data["previous_day_trend"])
+                
+                logger.info(f"BOOM BUY signal generated @ {candle_close}")
                 asyncio.create_task(send_telegram_alert(alert))
-                data["alert_count"] += 1
-                data["last_alert_time"] = datetime.utcnow()
+                data["daily_trade_count"] += 1
                 
     except Exception as e:
-        logger.error(f"Error processing candle: {e}")
+        logger.error(f"Error processing candle for {symbol}: {e}")
 
 async def deriv_websocket_connection():
     """Production-ready WebSocket connection with enhanced stability"""
@@ -283,10 +416,18 @@ async def deriv_websocket_connection():
                 
                 # Send startup notification
                 startup_msg = (
-                    f"🟢 <b>Deriv Signal Bot Started</b>\n\n"
+                    f"🟢 <b>Crash/Boom Strategy Bot Started</b>\n\n"
                     f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                     f"💻 {platform.node()}\n"
-                    f"🐍 Python {platform.python_version()}"
+                    f"🐍 Python {platform.python_version()}\n\n"
+                    f"📊 <b>Strategy Rules:</b>\n"
+                    f"🔻 CRASH: SELL only when prev day bearish\n"
+                    f"🔺 BOOM: BUY only when prev day bullish\n"
+                    f"📈 Max 2 trades per day per symbol\n\n"
+                    f"⚠️ <b>Important:</b>\n"
+                    f"• Bot will start analyzing from tomorrow\n"
+                    f"• Today is for data collection only\n"
+                    f"• Signals will begin after first full day analysis"
                 )
                 await send_telegram_alert(startup_msg, True)
                 
@@ -304,15 +445,37 @@ async def deriv_websocket_connection():
                             logger.error(f"API error: {data['error']['message']}")
                             continue
                             
-                        if data.get("msg_type") == "ohlc":
+                        if data.get("msg_type") == "candles":
+                            # Handle historical candles response
+                            candles = data.get("candles", [])
+                            symbol_code = data.get("echo_req", {}).get("ticks_history", "")
+                            
+                            if "1HZ100V" in symbol_code:
+                                symbol = "CRASH"
+                            elif "1HZ150V" in symbol_code:
+                                symbol = "BOOM"
+                            else:
+                                continue
+                            
+                            # Process historical candles
+                            for candle_data in candles:
+                                candle = {
+                                    "open": candle_data["open"],
+                                    "close": candle_data["close"],
+                                    "high": candle_data["high"],
+                                    "low": candle_data["low"],
+                                    "epoch": candle_data["epoch"]
+                                }
+                                trading_data[symbol]["historical_candles"].append(candle)
+                            
+                            logger.info(f"Loaded {len(candles)} historical candles for {symbol}")
+                            
+                        elif data.get("msg_type") == "ohlc":
+                            # Handle real-time candle updates
                             ohlc = data.get("ohlc", {})
                             if ohlc:
                                 symbol = "CRASH" if "1HZ100V" in ohlc.get("symbol", "") else "BOOM"
-                                process_candle(symbol, {
-                                    "open": ohlc["open"],
-                                    "close": ohlc["close"],
-                                    "symbol": ohlc["symbol"]
-                                })
+                                process_candle_data(symbol, ohlc)
                                 
                     except Exception as e:
                         logger.error(f"Error processing message: {e}")
@@ -329,12 +492,20 @@ async def health_monitoring():
     while True:
         await asyncio.sleep(3600)  # Every hour
         report = health_monitor.generate_health_report()
-        await send_telegram_alert(report, True)
+        
+        # Add trading status
+        status_report = report + "\n\n<b>Trading Status:</b>\n"
+        for symbol in trading_data:
+            data = trading_data[symbol]
+            status_report += (f"{symbol}: {data['daily_trade_count']}/2 trades, "
+                            f"Trend: {data['previous_day_trend'] or 'Unknown'}\n")
+        
+        await send_telegram_alert(status_report, True)
         logger.info("Sent hourly health report")
 
 async def main():
     """Main application entry point"""
-    logger.info("Starting Deriv Trading Signal Bot in production mode")
+    logger.info("Starting Deriv Trading Signal Bot with Crash/Boom Strategy")
     
     # Start health monitoring
     health_task = asyncio.create_task(health_monitoring())
