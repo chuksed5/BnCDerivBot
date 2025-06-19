@@ -59,39 +59,95 @@ logger = logging.getLogger(__name__)
 # CORRECTED symbol configuration with proper Deriv API symbol codes
 SYMBOLS = {
     "CRASH": {
-        "code": "CRASH1000",  # Correct symbol code for Crash 1000
+        "code": "CRASH1000",
         "name": "Crash 1000 Index",
-        "signal_type": "SELL",  # Only SELL for crash
+        "signal_type": "SELL",
         "pip_size": 0.01,
         "tp_pips_min": 70,
         "tp_pips_max": 100,
         "sl_pips_min": 10,
         "sl_pips_max": 15,
-        "ohlc_request": {
-            "ticks_history": "CRASH1000",  # Updated symbol code
-            "end": "latest",
-            "count": 50,
-            "granularity": 1800,  # 30 minutes
-            "style": "candles",
-            "subscribe": 1
+        # Multi-timeframe subscriptions
+        "timeframes": {
+            "5m": {
+                "granularity": 300,  # 5 minutes
+                "ohlc_request": {
+                    "ticks_history": "CRASH1000",
+                    "end": "latest",
+                    "count": 100,
+                    "granularity": 300,
+                    "style": "candles",
+                    "subscribe": 1
+                }
+            },
+            "30m": {
+                "granularity": 1800,  # 30 minutes (your main timeframe)
+                "ohlc_request": {
+                    "ticks_history": "CRASH1000",
+                    "end": "latest",
+                    "count": 50,
+                    "granularity": 1800,
+                    "style": "candles",
+                    "subscribe": 1
+                }
+            },
+            "1h": {
+                "granularity": 3600,  # 1 hour
+                "ohlc_request": {
+                    "ticks_history": "CRASH1000",
+                    "end": "latest",
+                    "count": 24,
+                    "granularity": 3600,
+                    "style": "candles",
+                    "subscribe": 1
+                }
+            }
         }
     },
     "BOOM": {
-        "code": "BOOM1000",  # Correct symbol code for Boom 1000
+        "code": "BOOM1000",
         "name": "Boom 1000 Index", 
-        "signal_type": "BUY",  # Only BUY for boom
+        "signal_type": "BUY",
         "pip_size": 0.01,
         "tp_pips_min": 80,
         "tp_pips_max": 150,
         "sl_pips_min": 10,
         "sl_pips_max": 20,
-        "ohlc_request": {
-            "ticks_history": "BOOM1000",  # Updated symbol code
-            "end": "latest",
-            "count": 50,
-            "granularity": 1800,
-            "style": "candles",
-            "subscribe": 1
+        # Multi-timeframe subscriptions
+        "timeframes": {
+            "5m": {
+                "granularity": 300,
+                "ohlc_request": {
+                    "ticks_history": "BOOM1000",
+                    "end": "latest",
+                    "count": 100,
+                    "granularity": 300,
+                    "style": "candles",
+                    "subscribe": 1
+                }
+            },
+            "30m": {
+                "granularity": 1800,
+                "ohlc_request": {
+                    "ticks_history": "BOOM1000",
+                    "end": "latest",
+                    "count": 50,
+                    "granularity": 1800,
+                    "style": "candles",
+                    "subscribe": 1
+                }
+            },
+            "1h": {
+                "granularity": 3600,
+                "ohlc_request": {
+                    "ticks_history": "BOOM1000",
+                    "end": "latest",
+                    "count": 24,
+                    "granularity": 3600,
+                    "style": "candles",
+                    "subscribe": 1
+                }
+            }
         }
     }
 }
@@ -138,28 +194,42 @@ trading_data = {
         "first_candle_close": None,
         "daily_trade_count": 0,
         "last_trade_date": None,
-        "historical_candles": [],
         "no_trade_alert_sent": False,
         "first_signal_price": None,
         "first_signal_sent": False,
         "price_went_against_us": False,
-        "reversal_threshold_hit": False,  # NEW: Track if we hit minimum reversal distance
-        "highest_price_after_first": None,  # NEW: Track highest price after first signal (for CRASH)
-        "lowest_price_after_first": None   # NEW: Track lowest price after first signal (for BOOM)
+        "reversal_threshold_hit": False,
+        "highest_price_after_first": None,
+        "lowest_price_after_first": None,
+        # Multi-timeframe data storage
+        "timeframes": {
+            "5m": {"candles": [], "trend": None, "momentum": None},
+            "30m": {"candles": [], "trend": None, "momentum": None},
+            "1h": {"candles": [], "trend": None, "momentum": None}
+        },
+        "mtf_alignment": {"score": 0, "signals": []},
+        "last_mtf_analysis": None
     },
     "BOOM": {
         "previous_day_trend": None,
         "first_candle_close": None,
         "daily_trade_count": 0,
         "last_trade_date": None,
-        "historical_candles": [],
         "no_trade_alert_sent": False,
         "first_signal_price": None,
         "first_signal_sent": False,
         "price_went_against_us": False,
-        "reversal_threshold_hit": False,  # NEW: Track if we hit minimum reversal distance
-        "highest_price_after_first": None,  # NEW: Track highest price after first signal (for BOOM)
-        "lowest_price_after_first": None   # NEW: Track lowest price after first signal (for CRASH)
+        "reversal_threshold_hit": False,
+        "highest_price_after_first": None,
+        "lowest_price_after_first": None,
+        # Multi-timeframe data storage
+        "timeframes": {
+            "5m": {"candles": [], "trend": None, "momentum": None},
+            "30m": {"candles": [], "trend": None, "momentum": None},
+            "1h": {"candles": [], "trend": None, "momentum": None}
+        },
+        "mtf_alignment": {"score": 0, "signals": []},
+        "last_mtf_analysis": None
     }
 }
 
@@ -271,8 +341,8 @@ def format_reversal_trade_alert(symbol, symbol_config, entry_price, first_candle
         f"📈 Signal: {data['daily_trade_count'] + 1}/2 (REVERSAL ENTRY)"
     )
 
-def process_candle_data(symbol, candle):
-    """Process candle with CORRECTED reversal-based second signal logic"""
+def process_candle_data(symbol, candle, timeframe="30m"):
+    """Enhanced candle processing with multi-timeframe analysis"""
     try:
         health_monitor.message_count += 1
         
@@ -290,60 +360,44 @@ def process_candle_data(symbol, candle):
             "epoch": int(candle.get("epoch", 0))
         }
         
-        data["historical_candles"].append(candle_data)
+        # Store candle in appropriate timeframe
+        if timeframe in data["timeframes"]:
+            data["timeframes"][timeframe]["candles"].append(candle_data)
+            
+            # Keep only recent candles
+            max_candles = {"5m": 200, "30m": 100, "1h": 50}
+            if len(data["timeframes"][timeframe]["candles"]) > max_candles[timeframe]:
+                data["timeframes"][timeframe]["candles"] = data["timeframes"][timeframe]["candles"][-max_candles[timeframe]:]
         
-        if len(data["historical_candles"]) > 200:
-            data["historical_candles"] = data["historical_candles"][-200:]
-        
+        # Process only on 30m timeframe for main logic
+        if timeframe != "30m":
+            return
+            
+        # Continue with your existing logic but add MTF confirmation...
         candle_epoch = candle_data["epoch"]
         candle_open = candle_data["open"]
         candle_close = candle_data["close"]
-        
-        # Log real-time price for debugging
-        logger.info(f"Real-time {symbol} price: Open={candle_open}, Close={candle_close}, Time={datetime.utcfromtimestamp(candle_epoch)}")
         
         # Handle first candle of the day
         if is_first_candle_of_day(candle_epoch) and data["first_candle_close"] is None:
             data["first_candle_close"] = candle_close
             logger.info(f"First candle of day stored for {symbol}: {candle_close}")
             
-            if len(data["historical_candles"]) >= 48:
-                data["previous_day_trend"] = analyze_previous_day_trend(symbol, data["historical_candles"])
+            if len(data["timeframes"]["30m"]["candles"]) >= 48:
+                data["previous_day_trend"] = analyze_previous_day_trend(symbol, data["timeframes"]["30m"]["candles"])
                 logger.info(f"Previous day trend for {symbol}: {data['previous_day_trend']}")
                 
-                # Send no-trade alerts if trend doesn't match
-                if symbol == "CRASH" and data["previous_day_trend"] != "BEARISH":
-                    if not data["no_trade_alert_sent"]:
-                        no_trade_alert = format_no_trade_alert(symbol, symbol_config, 
-                                                             data["previous_day_trend"], "wrong_trend")
-                        asyncio.create_task(send_telegram_alert(no_trade_alert))
-                        data["no_trade_alert_sent"] = True
-                        logger.info(f"NO TRADE alert sent for {symbol} - Previous day was {data['previous_day_trend']}")
-                
-                elif symbol == "BOOM" and data["previous_day_trend"] != "BULLISH":
-                    if not data["no_trade_alert_sent"]:
-                        no_trade_alert = format_no_trade_alert(symbol, symbol_config,
-                                                             data["previous_day_trend"], "wrong_trend")
-                        asyncio.create_task(send_telegram_alert(no_trade_alert))
-                        data["no_trade_alert_sent"] = True
-                        logger.info(f"NO TRADE alert sent for {symbol} - Previous day was {data['previous_day_trend']}")
-            
-            return
+                # Calculate initial MTF alignment
+                mtf_score = calculate_mtf_alignment(symbol)
+                logger.info(f"Initial MTF alignment for {symbol}: {mtf_score}%")
         
-        # Skip if we don't have required data or already sent 2 signals
+        # Skip if we don't have required data
         if (data["first_candle_close"] is None or 
             data["previous_day_trend"] is None or 
             data["daily_trade_count"] >= 2):
             return
         
-        # CONTINUOUS MONITORING: Check if price went against our first signal
-        if data["first_signal_sent"]:
-            price_went_against = check_if_price_went_against_us(symbol, candle_close)
-            if price_went_against and not data["price_went_against_us"]:
-                data["price_went_against_us"] = True
-                logger.info(f"{symbol} price went against first signal. Reversal tracking activated.")
-        
-        # FIRST SIGNAL LOGIC
+        # FIRST SIGNAL LOGIC with MTF confirmation
         if data["daily_trade_count"] == 0:
             signal_generated = False
             
@@ -352,30 +406,51 @@ def process_candle_data(symbol, candle):
                     candle_close < candle_open and
                     candle_close < data["first_candle_close"]):
                     
-                    alert = format_trade_alert(symbol, symbol_config, candle_close, 
-                                             data["first_candle_close"], data["previous_day_trend"])
-                    
-                    logger.info(f"FIRST SIGNAL - CRASH SELL @ {candle_close}")
-                    asyncio.create_task(send_telegram_alert(alert))
-                    signal_generated = True
-                    
+                    # MTF Confirmation
+                    can_trade, mtf_reason = should_take_trade_mtf(symbol)
+                    if can_trade:
+                        quality, emoji = get_mtf_signal_quality(symbol)
+                        alert = format_enhanced_trade_alert(symbol, symbol_config, candle_close, 
+                                                         data["first_candle_close"], data["previous_day_trend"],
+                                                         quality, emoji, mtf_reason, 1)
+                        
+                        logger.info(f"FIRST SIGNAL - CRASH SELL @ {candle_close} - Quality: {quality}")
+                        asyncio.create_task(send_telegram_alert(alert))
+                        signal_generated = True
+                    else:
+                        # Send MTF rejection alert
+                        rejection_alert = format_mtf_rejection_alert(symbol, symbol_config, mtf_reason)
+                        asyncio.create_task(send_telegram_alert(rejection_alert))
+                        logger.info(f"CRASH signal rejected due to MTF: {mtf_reason}")
+                        
             elif symbol == "BOOM":
                 if (data["previous_day_trend"] == "BULLISH" and
                     candle_close > candle_open and
                     candle_close > data["first_candle_close"]):
                     
-                    alert = format_trade_alert(symbol, symbol_config, candle_close,
-                                             data["first_candle_close"], data["previous_day_trend"])
-                    
-                    logger.info(f"FIRST SIGNAL - BOOM BUY @ {candle_close}")
-                    asyncio.create_task(send_telegram_alert(alert))
-                    signal_generated = True
+                    # MTF Confirmation
+                    can_trade, mtf_reason = should_take_trade_mtf(symbol)
+                    if can_trade:
+                        quality, emoji = get_mtf_signal_quality(symbol)
+                        alert = format_enhanced_trade_alert(symbol, symbol_config, candle_close,
+                                                         data["first_candle_close"], data["previous_day_trend"],
+                                                         quality, emoji, mtf_reason, 1)
+                        
+                        logger.info(f"FIRST SIGNAL - BOOM BUY @ {candle_close} - Quality: {quality}")
+                        asyncio.create_task(send_telegram_alert(alert))
+                        signal_generated = True
+                    else:
+                        # Send MTF rejection alert
+                        rejection_alert = format_mtf_rejection_alert(symbol, symbol_config, mtf_reason)
+                        asyncio.create_task(send_telegram_alert(rejection_alert))
+                        logger.info(f"BOOM signal rejected due to MTF: {mtf_reason}")
             
             if signal_generated:
                 data["daily_trade_count"] = 1
                 data["first_signal_sent"] = True
                 data["first_signal_price"] = candle_close
-                logger.info(f"First signal sent for {symbol} at {candle_close}")
+                
+        # Continue with reversal logic... (keep your existing reversal code)
         
         # SECOND SIGNAL LOGIC (REVERSAL) - CORRECTED
         elif (data["daily_trade_count"] == 1 and 
@@ -415,7 +490,65 @@ def process_candle_data(symbol, candle):
                 logger.info(f"Second (reversal) signal sent for {symbol} at {candle_close}")
                 
     except Exception as e:
-        logger.error(f"Error processing candle for {symbol}: {e}")
+        logger.error(f"Error processing candle for {symbol}-{timeframe}: {e}")
+
+def format_enhanced_trade_alert(symbol, symbol_config, entry_price, first_candle_close, trend, quality, quality_emoji, mtf_reason, signal_number):
+    """Enhanced trading alert with multi-timeframe analysis"""
+    current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M GMT")
+    data = trading_data[symbol]
+    
+    if symbol == "CRASH":
+        sl = round(entry_price + (symbol_config["sl_pips_max"] * symbol_config["pip_size"]), 2)
+        tp = round(entry_price - (symbol_config["tp_pips_min"] * symbol_config["pip_size"]), 2)
+        signal_type = "SELL"
+        emoji = "🔻"
+    else:  # BOOM
+        sl = round(entry_price - (symbol_config["sl_pips_max"] * symbol_config["pip_size"]), 2)
+        tp = round(entry_price + (symbol_config["tp_pips_min"] * symbol_config["tip_size"]), 2)
+        signal_type = "BUY"
+        emoji = "🔺"
+    
+    # Get MTF details
+    mtf_data = data["mtf_alignment"]
+    alignment_details = ""
+    for signal in mtf_data["signals"]:
+        tf_emoji = {"5m": "⏱️", "30m": "⏰", "1h": "🕐"}[signal["timeframe"]]
+        alignment_details += f"{tf_emoji}{signal['timeframe']}: {signal['trend']} ({signal['momentum']})\n"
+    
+    return (
+        f"🚨 <b>{symbol_config['name']} {signal_type} Signal #{signal_number}</b>\n\n"
+        f"📊 Previous Day: {trend}\n"
+        f"✅ Entry Condition: Met\n\n"
+        f"{emoji} <b>Trade Details:</b>\n"
+        f"💰 Entry: {entry_price}\n"
+        f"🎯 TP: {tp}\n"
+        f"❌ SL: {sl}\n\n"
+        f"{quality_emoji} <b>Signal Quality: {quality}</b>\n"
+        f"📈 MTF Score: {mtf_data['score']}%\n"
+        f"🎯 Signal Strength: {mtf_data['signal_strength']}%\n\n"
+        f"<b>📊 Multi-Timeframe Analysis:</b>\n"
+        f"{alignment_details}\n"
+        f"💡 Reason: {mtf_reason}\n\n"
+        f"📅 {current_time.split()[0]} ⏰ {current_time.split()[1]}\n"
+        f"📈 Daily Count: {signal_number}/2"
+    )
+
+def format_mtf_rejection_alert(symbol, symbol_config, reason):
+    """Alert when signal is rejected due to multi-timeframe analysis"""
+    current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M GMT")
+    data = trading_data[symbol]
+    
+    mtf_data = data["mtf_alignment"]
+    
+    return (
+        f"⚠️ <b>SIGNAL FILTERED - {symbol_config['name']}</b>\n\n"
+        f"❌ <b>Multi-Timeframe Filter Active</b>\n\n"
+        f"📊 MTF Score: {mtf_data['score']}% (Low Quality)\n"
+        f"🚫 Reason: {reason}\n\n"
+        f"💡 <b>This protects you from low-probability trades!</b>\n"
+        f"⏳ Waiting for better alignment...\n\n"
+        f"📅 {current_time}"
+    )
 
 def reset_daily_data():
     """Reset daily trading data for new day"""
@@ -478,9 +611,10 @@ def analyze_previous_day_trend(symbol, candles):
         return "BULLISH" if bullish_count > bearish_count else "BEARISH"
 
 def is_first_candle_of_day(candle_epoch):
-    """Check if this is the first 30min candle of the current day"""
+    """Check if this is the first 30min candle of the current day - UPDATED to check for 1:00 AM"""
     candle_time = datetime.utcfromtimestamp(candle_epoch)
-    return candle_time.hour == 0 and candle_time.minute in [0, 30]
+    # Updated to check for 1:00 AM as the first candle of the day
+    return candle_time.hour == 1 and candle_time.minute == 0
 
 async def send_telegram_alert(message, disable_notification=False):
     """Production-ready Telegram alert with retry and timeout"""
@@ -591,7 +725,7 @@ async def get_active_symbols():
         return []
 
 async def deriv_websocket_connection():
-    """Production-ready WebSocket connection with enhanced stability"""
+    """Enhanced WebSocket connection with multi-timeframe subscriptions"""
     while True:
         try:
             async with websockets.connect(
@@ -604,66 +738,43 @@ async def deriv_websocket_connection():
                 health_monitor.connection_count += 1
                 logger.info("Successfully connected to Deriv WebSocket")
                 
-                # First, get and log available symbols
-                await ws.send(json.dumps({"active_symbols": "brief", "product_type": "basic"}))
-                response = await ws.recv()
-                symbols_data = json.loads(response)
-                
-                if "active_symbols" in symbols_data:
-                    crash_boom_symbols = [s for s in symbols_data["active_symbols"] 
-                                        if "CRASH" in s["symbol"] or "BOOM" in s["symbol"]]
-                    logger.info("Available Crash/Boom symbols:")
-                    for symbol in crash_boom_symbols:
-                        logger.info(f"  {symbol['symbol']}: {symbol['display_name']}")
-                
-                # Send startup notification with symbol verification
+                # Send startup notification
                 startup_msg = (
-                    f"🟢 <b>Crash/Boom Strategy Bot Started</b>\n\n"
+                    f"🟢 <b>Enhanced Multi-Timeframe Bot Started</b>\n\n"
                     f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    f"💻 {platform.node()}\n"
-                    f"🐍 Python {platform.python_version()}\n\n"
-                    f"📊 <b>Monitoring Symbols:</b>\n"
-                    f"🔻 {SYMBOLS['CRASH']['code']} - {SYMBOLS['CRASH']['name']}\n"
-                    f"🔺 {SYMBOLS['BOOM']['code']} - {SYMBOLS['BOOM']['name']}\n\n"
-                    f"📈 <b>Strategy Rules:</b>\n"
-                    f"🔻 CRASH: SELL only when prev day bearish\n"
-                    f"🔺 BOOM: BUY only when prev day bullish\n"
-                    f"📈 Max 2 trades per day per symbol (with reversal logic)\n\n"
-                    f"⚡ <b>Real-time price monitoring active!</b>"
+                    f"⚡ <b>NEW FEATURES:</b>\n"
+                    f"🔍 Multi-Timeframe Analysis (5m, 30m, 1h)\n"
+                    f"🎯 Signal Quality Scoring\n"
+                    f"🚫 Low-Quality Signal Filtering\n"
+                    f"📊 Enhanced Trend Confirmation\n\n"
+                    f"📈 <b>Monitoring:</b> {len(SYMBOLS)} symbols across 3 timeframes"
                 )
                 await send_telegram_alert(startup_msg, True)
                 
-                # Subscribe to market data
+                # Subscribe to ALL timeframes for ALL symbols
                 for symbol in SYMBOLS:
-                    subscription_request = SYMBOLS[symbol]["ohlc_request"]
-                    await ws.send(json.dumps(subscription_request))
-                    logger.info(f"Subscribed to {symbol} ({SYMBOLS[symbol]['code']}) OHLC data")
+                    symbol_config = SYMBOLS[symbol]
+                    for tf_name, tf_config in symbol_config["timeframes"].items():
+                        await ws.send(json.dumps(tf_config["ohlc_request"]))
+                        logger.info(f"Subscribed to {symbol} {tf_name} timeframe")
                 
-                # Main message processing loop
+                # Message processing loop with timeframe detection
                 async for message in ws:
                     try:
                         data = json.loads(message)
                         
                         if "error" in data:
                             logger.error(f"API error: {data['error']['message']}")
-                            # If symbol not found, send alert
-                            if "symbol" in data["error"]["message"].lower():
-                                error_alert = (
-                                    f"❌ <b>Symbol Error Detected</b>\n\n"
-                                    f"Error: {data['error']['message']}\n\n"
-                                    f"Please check symbol codes:\n"
-                                    f"🔻 CRASH: {SYMBOLS['CRASH']['code']}\n"
-                                    f"🔺 BOOM: {SYMBOLS['BOOM']['code']}\n\n"
-                                    f"Bot will continue trying to reconnect..."
-                                )
-                                await send_telegram_alert(error_alert)
                             continue
                             
                         if data.get("msg_type") == "candles":
-                            # Handle historical candles response
+                            # Handle historical candles
                             candles = data.get("candles", [])
-                            symbol_code = data.get("echo_req", {}).get("ticks_history", "")
+                            echo_req = data.get("echo_req", {})
+                            symbol_code = echo_req.get("ticks_history", "")
+                            granularity = echo_req.get("granularity", 1800)
                             
+                            # Determine symbol and timeframe
                             if "CRASH1000" in symbol_code or "CRASH" in symbol_code:
                                 symbol = "CRASH"
                             elif "BOOM1000" in symbol_code or "BOOM" in symbol_code:
@@ -671,7 +782,11 @@ async def deriv_websocket_connection():
                             else:
                                 continue
                             
-                            # Process historical candles
+                            # Determine timeframe from granularity
+                            timeframe_map = {300: "5m", 1800: "30m", 3600: "1h"}
+                            timeframe = timeframe_map.get(granularity, "30m")
+                            
+                            # Store historical candles
                             for candle_data in candles:
                                 candle = {
                                     "open": candle_data["open"],
@@ -680,33 +795,250 @@ async def deriv_websocket_connection():
                                     "low": candle_data["low"],
                                     "epoch": candle_data["epoch"]
                                 }
-                                trading_data[symbol]["historical_candles"].append(candle)
+                                trading_data[symbol]["timeframes"][timeframe]["candles"].append(candle)
                             
-                            logger.info(f"Loaded {len(candles)} historical candles for {symbol}")
+                            logger.info(f"Loaded {len(candles)} historical candles for {symbol} {timeframe}")
                             
                         elif data.get("msg_type") == "ohlc":
                             # Handle real-time candle updates
                             ohlc = data.get("ohlc", {})
                             if ohlc:
                                 symbol_code = ohlc.get("symbol", "")
+                                granularity = ohlc.get("granularity", 1800)
+                                
                                 if "CRASH" in symbol_code:
                                     symbol = "CRASH"
                                 elif "BOOM" in symbol_code:
                                     symbol = "BOOM"
                                 else:
                                     continue
-                                    
-                                process_candle_data(symbol, ohlc)
+                                
+                                # Determine timeframe
+                                timeframe_map = {300: "5m", 1800: "30m", 3600: "1h"}
+                                timeframe = timeframe_map.get(granularity, "30m")
+                                
+                                # Process the candle
+                                process_candle_data(symbol, ohlc, timeframe)
                                 
                     except Exception as e:
                         logger.error(f"Error processing message: {e}")
                         
-        except (websockets.exceptions.ConnectionClosed, ConnectionError) as e:
+        except Exception as e:
             logger.error(f"Connection error: {e}. Reconnecting in 15 seconds...")
             await asyncio.sleep(15)
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}. Restarting in 30 seconds...")
-            await asyncio.sleep(30)
+
+def calculate_ema(prices, period):
+    """Calculate Exponential Moving Average"""
+    if len(prices) < period:
+        return None
+    
+    multiplier = 2 / (period + 1)
+    ema = prices[0]  # Start with the first price
+    
+    for price in prices[1:]:
+        ema = (price * multiplier) + (ema * (1 - multiplier))
+    
+    return ema
+
+def calculate_rsi(prices, period=14):
+    """Calculate Relative Strength Index"""
+    if len(prices) < period + 1:
+        return None
+    
+    gains = []
+    losses = []
+    
+    for i in range(1, len(prices)):
+        change = prices[i] - prices[i-1]
+        if change > 0:
+            gains.append(change)
+            losses.append(0)
+        else:
+            gains.append(0)
+            losses.append(abs(change))
+    
+    if len(gains) < period:
+        return None
+    
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+    
+    if avg_loss == 0:
+        return 100
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
+
+def analyze_timeframe_trend(candles, timeframe):
+    """Analyze trend and momentum for a specific timeframe"""
+    if len(candles) < 20:
+        return {"trend": "UNKNOWN", "momentum": "NEUTRAL", "strength": 0}
+    
+    closes = [float(c["close"]) for c in candles[-20:]]
+    highs = [float(c["high"]) for c in candles[-20:]]
+    lows = [float(c["low"]) for c in candles[-20:]]
+    
+    # Calculate EMAs
+    ema_9 = calculate_ema(closes, 9)
+    ema_21 = calculate_ema(closes, 21)
+    
+    # Calculate RSI
+    rsi = calculate_rsi(closes, 14)
+    
+    # Determine trend
+    current_price = closes[-1]
+    trend = "UNKNOWN"
+    strength = 0
+    
+    if ema_9 and ema_21:
+        if ema_9 > ema_21 and current_price > ema_9:
+            trend = "BULLISH"
+            strength = min(((ema_9 - ema_21) / ema_21) * 100, 100)
+        elif ema_9 < ema_21 and current_price < ema_9:
+            trend = "BEARISH" 
+            strength = min(((ema_21 - ema_9) / ema_21) * 100, 100)
+        else:
+            trend = "SIDEWAYS"
+            strength = 0
+    
+    # Determine momentum
+    momentum = "NEUTRAL"
+    if rsi:
+        if rsi > 70:
+            momentum = "OVERBOUGHT"
+        elif rsi < 30:
+            momentum = "OVERSOLD"
+        elif rsi > 50:
+            momentum = "BULLISH"
+        else:
+            momentum = "BEARISH"
+    
+    return {
+        "trend": trend,
+        "momentum": momentum,
+        "strength": strength,
+        "rsi": rsi,
+        "ema_9": ema_9,
+        "ema_21": ema_21,
+        "current_price": current_price
+    }
+
+def calculate_mtf_alignment(symbol):
+    """Calculate multi-timeframe alignment score"""
+    data = trading_data[symbol]
+    symbol_config = SYMBOLS[symbol]
+    
+    alignment_score = 0
+    signal_strength = 0
+    signals = []
+    
+    # Analyze each timeframe
+    for tf_name, tf_data in data["timeframes"].items():
+        if len(tf_data["candles"]) >= 20:
+            analysis = analyze_timeframe_trend(tf_data["candles"], tf_name)
+            tf_data["analysis"] = analysis
+            
+            # Weight timeframes (higher timeframes have more weight)
+            weight = {"5m": 1, "30m": 3, "1h": 5}[tf_name]
+            
+            if symbol == "CRASH":
+                # For CRASH (SELL signals), we want bearish alignment
+                if analysis["trend"] == "BEARISH":
+                    alignment_score += weight * 2
+                    signal_strength += analysis["strength"] * weight
+                elif analysis["trend"] == "SIDEWAYS" and analysis["momentum"] == "BEARISH":
+                    alignment_score += weight * 1
+                    signal_strength += (analysis["strength"] / 2) * weight
+                
+                # RSI confirmation for CRASH
+                if analysis["rsi"] and analysis["rsi"] > 60:
+                    alignment_score += weight * 0.5
+                    
+            elif symbol == "BOOM":
+                # For BOOM (BUY signals), we want bullish alignment
+                if analysis["trend"] == "BULLISH":
+                    alignment_score += weight * 2
+                    signal_strength += analysis["strength"] * weight
+                elif analysis["trend"] == "SIDEWAYS" and analysis["momentum"] == "BULLISH":
+                    alignment_score += weight * 1
+                    signal_strength += (analysis["strength"] / 2) * weight
+                
+                # RSI confirmation for BOOM
+                if analysis["rsi"] and analysis["rsi"] < 40:
+                    alignment_score += weight * 0.5
+            
+            signals.append({
+                "timeframe": tf_name,
+                "trend": analysis["trend"],
+                "momentum": analysis["momentum"],
+                "strength": analysis["strength"],
+                "weight": weight
+            })
+    
+    # Normalize scores
+    max_possible_score = (1 + 3 + 5) * 2.5  # Max weight * max multiplier
+    normalized_score = min((alignment_score / max_possible_score) * 100, 100)
+    
+    data["mtf_alignment"] = {
+        "score": round(normalized_score, 2),
+        "signal_strength": round(signal_strength / 9, 2),  # Normalize by total weight
+        "signals": signals,
+        "timestamp": datetime.utcnow()
+    }
+    
+    return normalized_score
+
+def get_mtf_signal_quality(symbol):
+    """Get signal quality based on multi-timeframe analysis"""
+    score = calculate_mtf_alignment(symbol)
+    
+    if score >= 80:
+        return "EXCELLENT", "🟢"
+    elif score >= 65:
+        return "GOOD", "🟡" 
+    elif score >= 50:
+        return "FAIR", "🟠"
+    else:
+        return "POOR", "🔴"
+
+def should_take_trade_mtf(symbol):
+    """Enhanced trade decision with multi-timeframe confirmation"""
+    data = trading_data[symbol]
+    
+    # Calculate current alignment
+    alignment_score = calculate_mtf_alignment(symbol)
+    
+    # Minimum score threshold for taking trades
+    MIN_ALIGNMENT_SCORE = 60  # You can adjust this
+    
+    if alignment_score < MIN_ALIGNMENT_SCORE:
+        logger.info(f"MTF alignment too weak for {symbol}: {alignment_score}% (need {MIN_ALIGNMENT_SCORE}%)")
+        return False, f"Multi-timeframe alignment only {alignment_score}% (need {MIN_ALIGNMENT_SCORE}%+)"
+    
+    # Additional confluence checks
+    confluence_count = 0
+    
+    # Check if 1H and 30M are aligned
+    h1_analysis = data["timeframes"]["1h"].get("analysis", {})
+    m30_analysis = data["timeframes"]["30m"].get("analysis", {})
+    
+    if symbol == "CRASH":
+        if h1_analysis.get("trend") == "BEARISH":
+            confluence_count += 2
+        if m30_analysis.get("momentum") in ["BEARISH", "OVERBOUGHT"]:
+            confluence_count += 1
+    elif symbol == "BOOM":
+        if h1_analysis.get("trend") == "BULLISH":
+            confluence_count += 2
+        if m30_analysis.get("momentum") in ["BULLISH", "OVERSOLD"]:
+            confluence_count += 1
+    
+    if confluence_count >= 2:
+        return True, f"Strong MTF alignment: {alignment_score}% with {confluence_count} confluence factors"
+    else:
+        return False, f"Insufficient confluence: {confluence_count}/3 factors aligned"
 
 async def health_monitoring():
     """Periodic health checks and reporting"""
