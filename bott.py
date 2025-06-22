@@ -629,7 +629,7 @@ async def deriv_websocket_connection():
                 
                 # Send startup notification with symbol verification
                 startup_msg = (
-                    f"🟢 <b>Crash/Boom Strategy Bot Started</b>\n\n"
+                    f"🟢 <b>Crash/Boom Strategy Bot Started V3</b>\n\n"
                     f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                     f"💻 {platform.node()}\n"
                     f"🐍 Python {platform.python_version()}\n\n"
